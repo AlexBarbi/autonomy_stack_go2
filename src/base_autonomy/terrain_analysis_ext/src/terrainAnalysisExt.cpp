@@ -17,7 +17,7 @@
 
 #include "tf2/transform_datatypes.h"
 #include "tf2_ros/transform_broadcaster.h"
-#include "tf2_geometry_msgs/tf2_geometry_msgs.h"
+#include "tf2_geometry_msgs/tf2_geometry_msgs.hpp"
 
 #include <pcl/filters/voxel_grid.h>
 #include <pcl/kdtree/kdtree_flann.h>
@@ -42,11 +42,11 @@ double clearingDis = 30.0;
 bool clearingCloud = false;
 bool useSorting = false;
 double quantileZ = 0.25;
-double vehicleHeight = 1.5;
+double vehicleHeight = 0.4;
 int voxelPointUpdateThre = 100;
 double voxelTimeUpdateThre = 2.0;
-double lowerBoundZ = -1.5;
-double upperBoundZ = 1.0;
+double lowerBoundZ = -0.55;
+double upperBoundZ = 0.2;
 double disRatioZ = 0.1;
 bool checkTerrainConn = true;
 double terrainUnderVehicle = -0.75;

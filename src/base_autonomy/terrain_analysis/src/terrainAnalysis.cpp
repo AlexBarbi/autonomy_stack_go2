@@ -15,7 +15,7 @@
 
 #include "tf2/transform_datatypes.h"
 #include "tf2_ros/transform_broadcaster.h"
-#include "tf2_geometry_msgs/tf2_geometry_msgs.h"
+#include "tf2_geometry_msgs/tf2_geometry_msgs.hpp"
 
 #include <pcl/filters/voxel_grid.h>
 #include <pcl/kdtree/kdtree_flann.h>
@@ -51,6 +51,16 @@ double absDyObsRelZThre = 0.2;
 double minDyObsVFOV = -16.0;
 double maxDyObsVFOV = 16.0;
 int minDyObsPointNum = 1;
+// Free-space carving (local patch): a stored obstacle point is deleted for good once rays of the current scan pass it
+// by more than carveMargin, i.e. whatever was there has moved away. Unlike clearDyObs this needs no FOV model (the
+// Aliengo L2 is mounted upside down and tilted) and never deletes what is merely occluded or out of view: such a point
+// has no return beyond it in its direction.
+bool carveDyObs = false;
+double carveBinSize = 2.0;    // deg, azimuth and elevation bins of the current-scan range image
+double carveMargin = 0.3;     // returns must lie this far beyond the point
+double carveMinDis = 0.8;     // closer points are in the lidar blind zone: no return says anything about them
+double carveMaxDis = 8.0;
+double carveMinHeight = 0.1;  // above the estimated ground; ground points are never carved
 bool noDataObstacle = false;
 int noDataBlockSkipNum = 0;
 int minBlockPointNum = 10;
@@ -59,10 +69,10 @@ double noDataAreaMinX = 0.3;
 double noDataAreaMaxX = 1.8;
 double noDataAreaMinY = -0.9;
 double noDataAreaMaxY = 0.9;
-double vehicleHeight = 1.5;
+double vehicleHeight = 0.4;
 int voxelPointUpdateThre = 100;
 double voxelTimeUpdateThre = 2.0;
-double minRelZ = -1.5;
+double minRelZ = -0.55;
 double maxRelZ = 0.2;
 double disRatioZ = 0.2;
 
@@ -115,6 +125,62 @@ float sinVehiclePitch = 0, cosVehiclePitch = 0;
 float sinVehicleYaw = 0, cosVehicleYaw = 0;
 
 pcl::VoxelGrid<pcl::PointXYZI> downSizeFilter;
+
+// Nearest return of the current scan per direction bin around the vehicle (sensor) position, -1 where there is none
+vector<float> scanMinRange;
+int carveAzNum = 0, carveElNum = 0;
+
+int carveAzInd(float dx, float dy) {
+  int ind = int((atan2(dy, dx) * 180.0 / PI + 180.0) / carveBinSize);
+  return ind % carveAzNum;
+}
+
+int carveElInd(float dz, float horiDis) {
+  int ind = int((atan2(dz, horiDis) * 180.0 / PI + 90.0) / carveBinSize);
+  return min(max(ind, 0), carveElNum - 1);
+}
+
+void buildScanRangeImage() {
+  carveAzNum = int(ceil(360.0 / carveBinSize));
+  carveElNum = int(ceil(180.0 / carveBinSize));
+  scanMinRange.assign(carveAzNum * carveElNum, -1.0);
+  for (const auto &point : laserCloud->points) {
+    float dx = point.x - vehicleX;
+    float dy = point.y - vehicleY;
+    float dz = point.z - vehicleZ;
+    float horiDis = sqrt(dx * dx + dy * dy);
+    float dis = sqrt(horiDis * horiDis + dz * dz);
+    if (dis < 1e-3)
+      continue;
+    float &minRange = scanMinRange[carveAzNum * carveElInd(dz, horiDis) + carveAzInd(dx, dy)];
+    if (minRange < 0 || dis < minRange)
+      minRange = dis;
+  }
+}
+
+// The current scan saw through the point: there are returns in the 3 x 3 bins around its direction and all of them lie
+// more than carveMargin beyond it. Taking the whole neighbourhood keeps the edges of static obstacles, which the sparse
+// scan may miss in one bin but not in all of them.
+bool carveSeenThrough(float dx, float dy, float dz, float horiDis, float dis) {
+  int azInd = carveAzInd(dx, dy);
+  int elInd = carveElInd(dz, horiDis);
+  bool hasReturn = false;
+  for (int dEl = -1; dEl <= 1; dEl++) {
+    int el = elInd + dEl;
+    if (el < 0 || el >= carveElNum)
+      continue;
+    for (int dAz = -1; dAz <= 1; dAz++) {
+      int az = (azInd + dAz + carveAzNum) % carveAzNum;
+      float minRange = scanMinRange[carveAzNum * el + az];
+      if (minRange < 0)
+        continue;
+      if (minRange < dis + carveMargin)
+        return false;
+      hasReturn = true;
+    }
+  }
+  return hasReturn;
+}
 
 // state estimation callback function
 void odometryHandler(const nav_msgs::msg::Odometry::ConstSharedPtr odom) {
@@ -223,6 +289,12 @@ int main(int argc, char **argv) {
   nh->declare_parameter<double>("minDyObsVFOV", minDyObsVFOV);
   nh->declare_parameter<double>("maxDyObsVFOV", maxDyObsVFOV);
   nh->declare_parameter<int>("minDyObsPointNum", minDyObsPointNum);
+  nh->declare_parameter<bool>("carveDyObs", carveDyObs);
+  nh->declare_parameter<double>("carveBinSize", carveBinSize);
+  nh->declare_parameter<double>("carveMargin", carveMargin);
+  nh->declare_parameter<double>("carveMinDis", carveMinDis);
+  nh->declare_parameter<double>("carveMaxDis", carveMaxDis);
+  nh->declare_parameter<double>("carveMinHeight", carveMinHeight);
   nh->declare_parameter<bool>("noDataObstacle", noDataObstacle);
   nh->declare_parameter<int>("noDataBlockSkipNum", noDataBlockSkipNum);
   nh->declare_parameter<int>("minBlockPointNum", minBlockPointNum);
@@ -255,6 +327,12 @@ int main(int argc, char **argv) {
   nh->get_parameter("minDyObsVFOV", minDyObsVFOV);
   nh->get_parameter("maxDyObsVFOV", maxDyObsVFOV);
   nh->get_parameter("minDyObsPointNum", minDyObsPointNum);
+  nh->get_parameter("carveDyObs", carveDyObs);
+  nh->get_parameter("carveBinSize", carveBinSize);
+  nh->get_parameter("carveMargin", carveMargin);
+  nh->get_parameter("carveMinDis", carveMinDis);
+  nh->get_parameter("carveMaxDis", carveMaxDis);
+  nh->get_parameter("carveMinHeight", carveMinHeight);
   nh->get_parameter("noDataObstacle", noDataObstacle);
   nh->get_parameter("noDataBlockSkipNum", noDataBlockSkipNum);
   nh->get_parameter("minBlockPointNum", minBlockPointNum);
@@ -579,6 +657,52 @@ int main(int argc, char **argv) {
             }
           }
         }
+      }
+
+      if (carveDyObs) {
+        buildScanRangeImage();
+        terrainCloud->clear();
+        for (int indX = terrainVoxelHalfWidth - 5;
+             indX <= terrainVoxelHalfWidth + 5; indX++) {
+          for (int indY = terrainVoxelHalfWidth - 5;
+               indY <= terrainVoxelHalfWidth + 5; indY++) {
+            pcl::PointCloud<pcl::PointXYZI>::Ptr terrainVoxelCloudPtr =
+                terrainVoxelCloud[terrainVoxelWidth * indX + indY];
+            int keptNum = 0;
+            for (const auto &terrainPoint : terrainVoxelCloudPtr->points) {
+              float dx = terrainPoint.x - vehicleX;
+              float dy = terrainPoint.y - vehicleY;
+              float dz = terrainPoint.z - vehicleZ;
+              float horiDis = sqrt(dx * dx + dy * dy);
+              float dis = sqrt(horiDis * horiDis + dz * dz);
+              bool carve = false;
+              if (dis > carveMinDis && dis < carveMaxDis) {
+                int planarIndX = int((dx + planarVoxelSize / 2) / planarVoxelSize) + planarVoxelHalfWidth;
+                int planarIndY = int((dy + planarVoxelSize / 2) / planarVoxelSize) + planarVoxelHalfWidth;
+                if (dx + planarVoxelSize / 2 < 0)
+                  planarIndX--;
+                if (dy + planarVoxelSize / 2 < 0)
+                  planarIndY--;
+                if (planarIndX >= 0 && planarIndX < planarVoxelWidth &&
+                    planarIndY >= 0 && planarIndY < planarVoxelWidth) {
+                  int planarInd = planarVoxelWidth * planarIndX + planarIndY;
+                  // Ground is only known where enough points were binned
+                  if (int(planarPointElev[planarInd].size()) >= minBlockPointNum &&
+                      terrainPoint.z - planarVoxelElev[planarInd] > carveMinHeight) {
+                    carve = carveSeenThrough(dx, dy, dz, horiDis, dis);
+                  }
+                }
+              }
+              if (!carve)
+                terrainVoxelCloudPtr->points[keptNum++] = terrainPoint;
+            }
+            terrainVoxelCloudPtr->points.resize(keptNum);
+            terrainVoxelCloudPtr->width = keptNum;
+            terrainVoxelCloudPtr->height = 1;
+            *terrainCloud += *terrainVoxelCloudPtr;
+          }
+        }
+        terrainCloudSize = terrainCloud->points.size();
       }
 
       terrainCloudElev->clear();
