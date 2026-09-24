@@ -6,11 +6,23 @@
          odom -> lio_map: joins the legged estimator tree (odom -> base, /odom) to the FAST-LIO tree (/Odometry).
                           lio_odom_alignment.py re-sets it on every /Odometry so that lio_base lands on base: the two
                           estimators drift apart, and a static TF would put relayed goals off by that drift.
-         camera_init -> map: terrainAnalysis(Ext) stamp their clouds "map", but the points are in camera_init. -->
+         camera_init -> map: terrainAnalysis(Ext) stamp their clouds "map", but the points are in camera_init.
+       Graph: far_load_graph.py loads graph_file (saved by the TARE exploration, explore_warehouse_launch.xml) through
+              graph_decoder once far_planner is up. It is used as saved (map = camera_init of the exploration): start
+              FAST-LIO from the same pose as the exploration did (robot standing at the spawn).
+       Inspection: far_inspection_goals.py sends the points of goals_file (picked on optimized_map.pcd with
+              SC_PGO_ROS2/utils/map_point_picker) to far_planner as goals, one after the other, once the graph is
+              loaded. Same frame caveat as the graph. No goals file: nothing happens, goals come from RViz as before. -->
   <arg name="use_sim_time" default="true"/>
   <arg name="terrain" default="true" description="Run terrainAnalysis and terrainAnalysisExt (false if already running)"/>
   <arg name="rviz" default="true"/>
   <arg name="far_config" default="default" description="Config file stem in far_planner/config"/>
+  <arg name="load_graph" default="true" description="Load graph_file into far_planner at start"/>
+  <arg name="graph_file" default="$(env HOME)/RaNAV/src/FAST_LIO_SLAM_ROS2/save_data/warehouse.vgh" description="FAR visibility graph (.vgh) saved at the end of the exploration"/>
+  <arg name="inspection" default="true" description="Send the points of goals_file to far_planner as goals, one after the other (false: goals only from RViz)"/>
+  <arg name="goals_file" default="$(env HOME)/RaNAV/src/FAST_LIO_SLAM_ROS2/save_data/selected_points.yaml" description="Inspection points saved by map_point_picker (.yaml or .json)"/>
+  <arg name="dwell_time" default="2.0" description="Seconds to stay at each inspection point before going to the next"/>
+  <arg name="loop" default="false" description="Start the inspection over after the last point"/>
   <arg name="waypoint" default="false" description="true: relay /way_point straight to OptiPessi (no obstacle check); false: tare_path_to_opti_pessi_goal.py picks a goal towards /way_point that keeps clearance from /terrain_map obstacles (midpoint, else detour, else stop)"/>
 
   <node pkg="legged_controllers" exec="lio_odom_alignment.py" name="lio_odom_alignment" output="screen">
@@ -40,6 +52,26 @@
     <remap from="/terrain_cloud" to="/terrain_map_ext"/>
     <remap from="/scan_cloud" to="/terrain_map"/>
     <remap from="/terrain_local_cloud" to="/cloud_registered"/>
+  </node>
+
+  <!-- graph_decoder reads/saves .vgh files (/read_file_dir, /save_file_dir): far_planner's own handlers are stubs -->
+  <node pkg="graph_decoder" exec="graph_decoder" name="graph_decoder" output="screen">
+    <param name="world_frame" value="map"/>
+    <param name="visual_scale_ratio" value="0.5"/>
+    <param name="use_sim_time" value="$(var use_sim_time)"/>
+  </node>
+  <node if="$(var load_graph)" pkg="legged_controllers" exec="far_load_graph.py" name="far_load_graph" output="screen">
+    <param name="graph_file" value="$(var graph_file)"/>
+    <param name="use_sim_time" value="$(var use_sim_time)"/>
+  </node>
+
+  <node if="$(var inspection)" pkg="legged_controllers" exec="far_inspection_goals.py" name="far_inspection_goals" output="screen">
+    <param name="goals_file" value="$(var goals_file)"/>
+    <param name="wait_for_graph" value="$(var load_graph)"/>
+    <param name="graph_file" value="$(var graph_file)"/>
+    <param name="dwell_time" value="$(var dwell_time)"/>
+    <param name="loop" value="$(var loop)"/>
+    <param name="use_sim_time" value="$(var use_sim_time)"/>
   </node>
 
   <!-- FAR expects a local planner to reach /way_point (often an obstacle corner, meters away) and OptiPessi walks the
