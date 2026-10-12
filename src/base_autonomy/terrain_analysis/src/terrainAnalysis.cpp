@@ -53,7 +53,7 @@ double maxDyObsVFOV = 16.0;
 int minDyObsPointNum = 1;
 // Free-space carving (local patch): a stored obstacle point is deleted for good once rays of the current scan pass it
 // by more than carveMargin, i.e. whatever was there has moved away. Unlike clearDyObs this needs no FOV model (the
-// Aliengo L2 is mounted upside down and tilted) and never deletes what is merely occluded or out of view: such a point
+// Aliengo lidar is mounted tilted) and never deletes what is merely occluded or out of view: such a point
 // has no return beyond it in its direction.
 bool carveDyObs = false;
 double carveBinSize = 2.0;    // deg, azimuth and elevation bins of the current-scan range image
@@ -61,6 +61,13 @@ double carveMargin = 0.3;     // returns must lie this far beyond the point
 double carveMinDis = 0.8;     // closer points are in the lidar blind zone: no return says anything about them
 double carveMaxDis = 8.0;
 double carveMinHeight = 0.1;  // above the estimated ground; ground points are never carved
+// Flat-floor prior (local patch) for a lidar that does not see the floor around the robot (RoboSense Airy dome on top
+// of the trunk: floor only from ~2 m ahead, beside and behind only what is above the lidar). A cell whose ground
+// estimate is more than groundPriorTolerance above the floor the vehicle stands on did not show its floor: its ground
+// is that floor (vehicleZ - sensorHeight), so its points are obstacles on it and not elevated ground.
+bool groundPrior = false;
+double sensorHeight = 0.47;   // of /state_estimation above the floor
+double groundPriorTolerance = 0.2;
 bool noDataObstacle = false;
 int noDataBlockSkipNum = 0;
 int minBlockPointNum = 10;
@@ -295,6 +302,9 @@ int main(int argc, char **argv) {
   nh->declare_parameter<double>("carveMinDis", carveMinDis);
   nh->declare_parameter<double>("carveMaxDis", carveMaxDis);
   nh->declare_parameter<double>("carveMinHeight", carveMinHeight);
+  nh->declare_parameter<bool>("groundPrior", groundPrior);
+  nh->declare_parameter<double>("sensorHeight", sensorHeight);
+  nh->declare_parameter<double>("groundPriorTolerance", groundPriorTolerance);
   nh->declare_parameter<bool>("noDataObstacle", noDataObstacle);
   nh->declare_parameter<int>("noDataBlockSkipNum", noDataBlockSkipNum);
   nh->declare_parameter<int>("minBlockPointNum", minBlockPointNum);
@@ -333,6 +343,9 @@ int main(int argc, char **argv) {
   nh->get_parameter("carveMinDis", carveMinDis);
   nh->get_parameter("carveMaxDis", carveMaxDis);
   nh->get_parameter("carveMinHeight", carveMinHeight);
+  nh->get_parameter("groundPrior", groundPrior);
+  nh->get_parameter("sensorHeight", sensorHeight);
+  nh->get_parameter("groundPriorTolerance", groundPriorTolerance);
   nh->get_parameter("noDataObstacle", noDataObstacle);
   nh->get_parameter("noDataBlockSkipNum", noDataBlockSkipNum);
   nh->get_parameter("minBlockPointNum", minBlockPointNum);
@@ -655,6 +668,16 @@ int main(int argc, char **argv) {
             if (minID != -1) {
               planarVoxelElev[i] = planarPointElev[i][minID];
             }
+          }
+        }
+      }
+
+      if (groundPrior) {
+        float floorElev = vehicleZ - sensorHeight;
+        for (int i = 0; i < planarVoxelNum; i++) {
+          if (planarPointElev[i].size() > 0 &&
+              planarVoxelElev[i] > floorElev + groundPriorTolerance) {
+            planarVoxelElev[i] = floorElev;
           }
         }
       }

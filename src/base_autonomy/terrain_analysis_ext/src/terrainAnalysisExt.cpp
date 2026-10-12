@@ -53,6 +53,12 @@ double terrainUnderVehicle = -0.75;
 double terrainConnThre = 0.5;
 double ceilingFilteringThre = 2.0;
 double localTerrainMapRadius = 4.0;
+// Flat-floor prior (local patch), as in terrainAnalysis: a cell whose ground estimate is more than
+// groundPriorTolerance above the floor the vehicle stands on (vehicleZ - sensorHeight) did not show its floor, so its
+// ground is that floor. For a lidar that does not see the floor around the robot (RoboSense Airy dome).
+bool groundPrior = false;
+double sensorHeight = 0.47;   // of /state_estimation above the floor
+double groundPriorTolerance = 0.2;
 
 // terrain voxel parameters
 float terrainVoxelSize = 2.0;
@@ -195,6 +201,9 @@ int main(int argc, char** argv)
   nh->declare_parameter<double>("terrainConnThre", terrainConnThre);
   nh->declare_parameter<double>("ceilingFilteringThre", ceilingFilteringThre);
   nh->declare_parameter<double>("localTerrainMapRadius", localTerrainMapRadius);
+  nh->declare_parameter<bool>("groundPrior", groundPrior);
+  nh->declare_parameter<double>("sensorHeight", sensorHeight);
+  nh->declare_parameter<double>("groundPriorTolerance", groundPriorTolerance);
 
   nh->get_parameter("scanVoxelSize", scanVoxelSize);
   nh->get_parameter("decayTime", decayTime);
@@ -213,6 +222,9 @@ int main(int argc, char** argv)
   nh->get_parameter("terrainConnThre", terrainConnThre);
   nh->get_parameter("ceilingFilteringThre", ceilingFilteringThre);
   nh->get_parameter("localTerrainMapRadius", localTerrainMapRadius);
+  nh->get_parameter("groundPrior", groundPrior);
+  nh->get_parameter("sensorHeight", sensorHeight);
+  nh->get_parameter("groundPriorTolerance", groundPriorTolerance);
 
   auto subOdometry = nh->create_subscription<nav_msgs::msg::Odometry>("/state_estimation", 5, odometryHandler);
 
@@ -463,6 +475,18 @@ int main(int argc, char** argv)
         }
       }
   
+      if (groundPrior)
+      {
+        float floorElev = vehicleZ - sensorHeight;
+        for (int i = 0; i < planarVoxelNum; i++)
+        {
+          if (planarPointElev[i].size() > 0 && planarVoxelElev[i] > floorElev + groundPriorTolerance)
+          {
+            planarVoxelElev[i] = floorElev;
+          }
+        }
+      }
+
       // check terrain connectivity to remove ceiling
       if (checkTerrainConn)
       {
