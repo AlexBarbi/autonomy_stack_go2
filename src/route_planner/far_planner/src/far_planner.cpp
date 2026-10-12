@@ -771,7 +771,9 @@ void FARMaster::TerrainCallBack(const sensor_msgs::msg::PointCloud2::SharedPtr p
   FARUtil::StackCloudByTime(FARUtil::cur_new_cloud_, FARUtil::stack_new_cloud_, FARUtil::kNewDecayTime, nh_);
   FARUtil::UpdateKdTrees(FARUtil::stack_new_cloud_);
 
-  if (!FARUtil::surround_obs_cloud_->empty()) is_cloud_init_ = true;
+  // Local patch: free ground counts too. Upstream waits for an obstacle, so on an open floor with nothing but people
+  // around, and the people taken out of the terrain maps, the graph never started (and no saved graph was loaded).
+  if (!FARUtil::surround_obs_cloud_->empty() || !FARUtil::surround_free_cloud_->empty()) is_cloud_init_ = true;
 
   /* visualize clouds */
   planner_viz_.VizPointCloud(new_PCL_pub_, FARUtil::stack_new_cloud_);
