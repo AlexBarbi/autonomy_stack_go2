@@ -72,6 +72,8 @@ target_link_libraries(${PROJECT_NAME} ${PCL_LIBRARIES} ${OpenCV_LIBS})
 
 install(TARGETS ${PROJECT_NAME} DESTINATION lib/${PROJECT_NAME})
 
+install(PROGRAMS scripts/far_load_graph.py scripts/far_inspection_goals.py DESTINATION lib/${PROJECT_NAME})
+
 install(DIRECTORY launch DESTINATION share/${PROJECT_NAME})
 
 install(DIRECTORY rviz DESTINATION share/${PROJECT_NAME})

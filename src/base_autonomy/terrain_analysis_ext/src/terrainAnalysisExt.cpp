@@ -59,6 +59,11 @@ double localTerrainMapRadius = 4.0;
 bool groundPrior = false;
 double sensorHeight = 0.47;   // of /state_estimation above the floor
 double groundPriorTolerance = 0.2;
+// groundPriorFill (local patch, with groundPrior), as in terrainAnalysis: for a lidar that never sees the floor (the
+// Airy dome mounted upright). A cell without points is on that floor too: the connectivity check walks across it to
+// the obstacles (without it they are cut off as soon as 4 m of floor lie in between), and beyond the local terrain
+// map, which brings its own, such a cell gets a point at ground level (intensity 0) for far_planner.
+bool groundPriorFill = false;
 
 // terrain voxel parameters
 float terrainVoxelSize = 2.0;
@@ -204,6 +209,7 @@ int main(int argc, char** argv)
   nh->declare_parameter<bool>("groundPrior", groundPrior);
   nh->declare_parameter<double>("sensorHeight", sensorHeight);
   nh->declare_parameter<double>("groundPriorTolerance", groundPriorTolerance);
+  nh->declare_parameter<bool>("groundPriorFill", groundPriorFill);
 
   nh->get_parameter("scanVoxelSize", scanVoxelSize);
   nh->get_parameter("decayTime", decayTime);
@@ -225,6 +231,7 @@ int main(int argc, char** argv)
   nh->get_parameter("groundPrior", groundPrior);
   nh->get_parameter("sensorHeight", sensorHeight);
   nh->get_parameter("groundPriorTolerance", groundPriorTolerance);
+  nh->get_parameter("groundPriorFill", groundPriorFill);
 
   auto subOdometry = nh->create_subscription<nav_msgs::msg::Odometry>("/state_estimation", 5, odometryHandler);
 
@@ -487,6 +494,18 @@ int main(int argc, char** argv)
         }
       }
 
+      if (groundPrior && groundPriorFill)
+      {
+        float floorElev = vehicleZ - sensorHeight;
+        for (int i = 0; i < planarVoxelNum; i++)
+        {
+          if (planarPointElev[i].size() == 0)
+          {
+            planarVoxelElev[i] = floorElev;
+          }
+        }
+      }
+
       // check terrain connectivity to remove ceiling
       if (checkTerrainConn)
       {
@@ -511,7 +530,7 @@ int main(int argc, char** argv)
               if (indX + dX >= 0 && indX + dX < planarVoxelWidth && indY + dY >= 0 && indY + dY < planarVoxelWidth)
               {
                 ind = planarVoxelWidth * (indX + dX) + indY + dY;
-                if (planarVoxelConn[ind] == 0 && planarPointElev[ind].size() > 0)
+                if (planarVoxelConn[ind] == 0 && (planarPointElev[ind].size() > 0 || (groundPrior && groundPriorFill)))
                 {
                   if (fabs(planarVoxelElev[front] - planarVoxelElev[ind]) < terrainConnThre)
                   {
@@ -570,6 +589,37 @@ int main(int argc, char** argv)
         float dis = sqrt((point.x - vehicleX) * (point.x - vehicleX) + (point.y - vehicleY) * (point.y - vehicleY));
         if (dis <= localTerrainMapRadius)
         {
+          terrainCloudElev->push_back(point);
+        }
+      }
+
+      if (groundPrior && groundPriorFill)
+      {
+        std::vector<char> planarVoxelHasPoint(planarVoxelNum, 0);
+        int terrainCloudElevFullSize = terrainCloudElev->points.size();
+        for (int i = 0; i < terrainCloudElevFullSize; i++)
+        {
+          point = terrainCloudElev->points[i];
+          int indX = int((point.x - vehicleX + planarVoxelSize / 2) / planarVoxelSize) + planarVoxelHalfWidth;
+          int indY = int((point.y - vehicleY + planarVoxelSize / 2) / planarVoxelSize) + planarVoxelHalfWidth;
+          if (point.x - vehicleX + planarVoxelSize / 2 < 0)
+            indX--;
+          if (point.y - vehicleY + planarVoxelSize / 2 < 0)
+            indY--;
+          if (indX >= 0 && indX < planarVoxelWidth && indY >= 0 && indY < planarVoxelWidth)
+          {
+            planarVoxelHasPoint[planarVoxelWidth * indX + indY] = 1;
+          }
+        }
+        for (int i = 0; i < planarVoxelNum; i++)
+        {
+          float relX = planarVoxelSize * (int(i / planarVoxelWidth) - planarVoxelHalfWidth);
+          float relY = planarVoxelSize * (i % planarVoxelWidth - planarVoxelHalfWidth);
+          if (planarVoxelHasPoint[i] || sqrt(relX * relX + relY * relY) <= localTerrainMapRadius) continue;
+          point.x = relX + vehicleX;
+          point.y = relY + vehicleY;
+          point.z = vehicleZ - sensorHeight;
+          point.intensity = 0;
           terrainCloudElev->push_back(point);
         }
       }

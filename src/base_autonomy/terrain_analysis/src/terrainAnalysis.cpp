@@ -68,6 +68,11 @@ double carveMinHeight = 0.1;  // above the estimated ground; ground points are n
 bool groundPrior = false;
 double sensorHeight = 0.47;   // of /state_estimation above the floor
 double groundPriorTolerance = 0.2;
+// groundPriorFill (local patch, with groundPrior): a cell of the map that holds no point gets one on that floor, at
+// ground level (intensity 0). For a lidar that never sees the floor (the Airy dome mounted upright): the map then
+// holds obstacles only, and far_planner, which stands its graph on the ground points, crashes without them. The
+// flat floor is assumed wherever nothing was seen, also where the lidar could not look.
+bool groundPriorFill = false;
 bool noDataObstacle = false;
 int noDataBlockSkipNum = 0;
 int minBlockPointNum = 10;
@@ -305,6 +310,7 @@ int main(int argc, char **argv) {
   nh->declare_parameter<bool>("groundPrior", groundPrior);
   nh->declare_parameter<double>("sensorHeight", sensorHeight);
   nh->declare_parameter<double>("groundPriorTolerance", groundPriorTolerance);
+  nh->declare_parameter<bool>("groundPriorFill", groundPriorFill);
   nh->declare_parameter<bool>("noDataObstacle", noDataObstacle);
   nh->declare_parameter<int>("noDataBlockSkipNum", noDataBlockSkipNum);
   nh->declare_parameter<int>("minBlockPointNum", minBlockPointNum);
@@ -346,6 +352,7 @@ int main(int argc, char **argv) {
   nh->get_parameter("groundPrior", groundPrior);
   nh->get_parameter("sensorHeight", sensorHeight);
   nh->get_parameter("groundPriorTolerance", groundPriorTolerance);
+  nh->get_parameter("groundPriorFill", groundPriorFill);
   nh->get_parameter("noDataObstacle", noDataObstacle);
   nh->get_parameter("noDataBlockSkipNum", noDataBlockSkipNum);
   nh->get_parameter("minBlockPointNum", minBlockPointNum);
@@ -765,6 +772,30 @@ int main(int argc, char **argv) {
               }
             }
           }
+        }
+      }
+
+      if (groundPrior && groundPriorFill) {
+        std::vector<char> planarVoxelHasPoint(planarVoxelNum, 0);
+        for (int i = 0; i < terrainCloudElevSize; i++) {
+          point = terrainCloudElev->points[i];
+          int indX = int((point.x - vehicleX + planarVoxelSize / 2) / planarVoxelSize) + planarVoxelHalfWidth;
+          int indY = int((point.y - vehicleY + planarVoxelSize / 2) / planarVoxelSize) + planarVoxelHalfWidth;
+          if (point.x - vehicleX + planarVoxelSize / 2 < 0)
+            indX--;
+          if (point.y - vehicleY + planarVoxelSize / 2 < 0)
+            indY--;
+          if (indX >= 0 && indX < planarVoxelWidth && indY >= 0 && indY < planarVoxelWidth) {
+            planarVoxelHasPoint[planarVoxelWidth * indX + indY] = 1;
+          }
+        }
+        for (int i = 0; i < planarVoxelNum; i++) {
+          if (planarVoxelHasPoint[i]) continue;
+          point.x = planarVoxelSize * (int(i / planarVoxelWidth) - planarVoxelHalfWidth) + vehicleX;
+          point.y = planarVoxelSize * (i % planarVoxelWidth - planarVoxelHalfWidth) + vehicleY;
+          point.z = vehicleZ - sensorHeight;
+          point.intensity = 0;
+          terrainCloudElev->push_back(point);
         }
       }
 

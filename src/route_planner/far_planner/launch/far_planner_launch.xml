@@ -33,7 +33,7 @@
   <arg name="people_free" default="true" description="far_planner plans on terrain maps without the tracked people (/terrain_map_static, /terrain_map_ext_static): a person walking by leaves no wall in its graph and, next to the robot, does not make it lose its route and give the goal up. The goal bridge (/terrain_map) and OptiPessi (/opti_pessi/obstacles) still see the people. false: far_planner sees them as obstacles"/>
   <arg name="waypoint" default="false" description="true: relay /way_point straight to OptiPessi (no obstacle check); false: tare_path_to_opti_pessi_goal.py follows far_planner's route (/viz_path_topic): a goal 3 m ahead along it that keeps clearance from /terrain_map obstacles (else nearer along it, else detour, else stop)"/>
 
-  <node pkg="legged_controllers" exec="lio_odom_alignment.py" name="lio_odom_alignment" output="screen">
+  <node pkg="fast_lio" exec="lio_odom_alignment.py" name="lio_odom_alignment" output="screen">
     <param name="use_sim_time" value="$(var use_sim_time)"/>
   </node>
   <node pkg="tf2_ros" exec="static_transform_publisher" name="camera_init_to_map"
@@ -97,12 +97,12 @@
     <param name="visual_scale_ratio" value="0.5"/>
     <param name="use_sim_time" value="$(var use_sim_time)"/>
   </node>
-  <node if="$(var load_graph)" pkg="legged_controllers" exec="far_load_graph.py" name="far_load_graph" output="screen">
+  <node if="$(var load_graph)" pkg="far_planner" exec="far_load_graph.py" name="far_load_graph" output="screen">
     <param name="graph_file" value="$(var graph_file)"/>
     <param name="use_sim_time" value="$(var use_sim_time)"/>
   </node>
 
-  <node if="$(var inspection)" pkg="legged_controllers" exec="far_inspection_goals.py" name="far_inspection_goals" output="screen">
+  <node if="$(var inspection)" pkg="far_planner" exec="far_inspection_goals.py" name="far_inspection_goals" output="screen">
     <param name="goals_file" value="$(var goals_file)"/>
     <param name="wait_for_graph" value="$(var load_graph)"/>
     <param name="graph_file" value="$(var graph_file)"/>
@@ -117,11 +117,11 @@
        goal, so the bridge follows the route FAR has planned instead (route_topic, the line FAR shows in rviz): the
        goal is the point lookahead_distance ahead of the robot along it, checked against /terrain_map (nearer along
        the route, a detour or a stop when something is in the way). /way_point is only used when FAR has no route. -->
-  <node unless="$(var waypoint)" pkg="legged_controllers" exec="tare_path_to_opti_pessi_goal.py" name="tare_path_to_opti_pessi_goal" output="screen">
+  <node unless="$(var waypoint)" pkg="tare_planner" exec="tare_path_to_opti_pessi_goal.py" name="tare_path_to_opti_pessi_goal" output="screen">
     <param name="use_sim_time" value="$(var use_sim_time)"/>
     <param name="route_topic" value="/viz_path_topic"/>
   </node>
-  <node if="$(var waypoint)" pkg="legged_controllers" exec="way_point_to_opti_pessi_goal.py" name="way_point_to_opti_pessi_goal" output="screen"/>
+  <node if="$(var waypoint)" pkg="tare_planner" exec="way_point_to_opti_pessi_goal.py" name="way_point_to_opti_pessi_goal" output="screen"/>
 
   <!-- Publish Point tool sends the FAR goal (/goal_point); click on a cloud, not empty space -->
   <node if="$(var rviz)" pkg="rviz2" exec="rviz2" name="far_nav_rviz"
