@@ -4,9 +4,9 @@
        Topics: /Odometry and /cloud_registered (FAST-LIO, camera_init) replace the autonomy stack's /state_estimation and /registered_scan.
                With people_free, far_planner reads terrain maps of its own, made from /registered_scan_static (the scans
                without the tracked people, people_perception dynamic_points_filter in fast_lio_slam_launch.xml).
-       TF:  odom -> lio_map -> camera_init -> map
+       TF:  odom -> lio_map -> camera_init -> map, all from FAST-LIO (fast_lio_slam_launch.xml)
          odom -> lio_map: joins the legged estimator tree (odom -> base, /odom) to the FAST-LIO tree (/Odometry).
-                          lio_odom_alignment.py re-sets it on every /Odometry so that lio_base lands on base: the two
+                          FAST-LIO re-sets it on every /Odometry so that lio_base lands on base: the two
                           estimators drift apart, and a static TF would put relayed goals off by that drift.
          camera_init -> map: terrainAnalysis(Ext) stamp their clouds "map", but the points are in camera_init.
        Graph: far_load_graph.py loads graph_file (saved by the TARE exploration, explore_warehouse_launch.xml) through
@@ -32,12 +32,6 @@
   <arg name="loop" default="false" description="Start the inspection over after the last point"/>
   <arg name="people_free" default="true" description="far_planner plans on terrain maps without the tracked people (/terrain_map_static, /terrain_map_ext_static): a person walking by leaves no wall in its graph and, next to the robot, does not make it lose its route and give the goal up. The goal bridge (/terrain_map) and OptiPessi (/opti_pessi/obstacles) still see the people. false: far_planner sees them as obstacles"/>
   <arg name="waypoint" default="false" description="true: relay /way_point straight to OptiPessi (no obstacle check); false: tare_path_to_opti_pessi_goal.py follows far_planner's route (/viz_path_topic): a goal 3 m ahead along it that keeps clearance from /terrain_map obstacles (else nearer along it, else detour, else stop)"/>
-
-  <node pkg="fast_lio" exec="lio_odom_alignment.py" name="lio_odom_alignment" output="screen">
-    <param name="use_sim_time" value="$(var use_sim_time)"/>
-  </node>
-  <node pkg="tf2_ros" exec="static_transform_publisher" name="camera_init_to_map"
-    args="--frame-id camera_init --child-frame-id map"/>
 
   <!-- carveDyObs: no ghosts of moved obstacles in /terrain_map, see tare_explore_nav_launch.xml -->
   <node if="$(var terrain)" pkg="terrain_analysis" exec="terrainAnalysis" name="terrainAnalysis" output="screen">
