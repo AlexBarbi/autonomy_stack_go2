@@ -81,10 +81,10 @@ double noDataAreaMinX = 0.3;
 double noDataAreaMaxX = 1.8;
 double noDataAreaMinY = -0.9;
 double noDataAreaMaxY = 0.9;
-double vehicleHeight = 0.4;
+double vehicleHeight = 1.5;
 int voxelPointUpdateThre = 100;
 double voxelTimeUpdateThre = 2.0;
-double minRelZ = -0.55;
+double minRelZ = -1.5;
 double maxRelZ = 0.2;
 double disRatioZ = 0.2;
 
